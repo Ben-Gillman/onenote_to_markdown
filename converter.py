@@ -1,19 +1,16 @@
-#!/usr/bin/env python3
-
 ''' 
 python executable that takes command line arguments for in_dir, out_dir
 '''
 
-
 import argparse
-import pathlib
 from collections import deque
-import time
 import datetime as dt
-from pytz import timezone
-from win32_setctime import setctime
 from os import utime
+import pathlib
+from pytz import timezone
+import time
 from typing import Set
+from win32_setctime import setctime
 
 EASTERN = timezone('US/Eastern')
 DOW = {"Monday", "Tuesday", "Wednesday",
@@ -73,18 +70,22 @@ def produce_markdown_files(notebook_file: pathlib.PosixPath, notebook_lines: Set
     curr_datetime = None
     lines = []
 
+    def write_file():
+        if curr_file_loc.exists():
+            raise ValueError(curr_file_loc.name + " already exists")
+        file = curr_file_loc.open("w", errors="strict", encoding='utf-8')
+        file.writelines(lines)
+        file.close()
+        setctime(curr_file_loc, curr_datetime)
+        utime(curr_file_loc, (curr_datetime, curr_datetime))
+
     with notebook_file.open("r", encoding="utf-8") as file:
         for line_num, curr_line in enumerate(file, 1):
             # title found
             if line_num in notebook_lines:
                 if curr_file_loc is not None:
                     print("writing to", curr_file_loc)
-                    file = curr_file_loc.open(
-                        "w", errors="strict", encoding='utf-8')
-                    file.writelines(lines)
-                    file.close()
-                    setctime(curr_file_loc, curr_datetime)
-                    utime(curr_file_loc, (curr_datetime, curr_datetime))
+                    write_file()
                     lines.clear()
                     curr_file_loc = None
 
@@ -110,28 +111,25 @@ def produce_markdown_files(notebook_file: pathlib.PosixPath, notebook_lines: Set
                         curr_title = curr_title.replace(char, " ")
 
                     curr_file_loc = notebook_file.parent / \
-                        notebook_file.name[:-4] / (curr_title + ".md")
-                    if not curr_file_loc.parent.exists():
-                        raise ValueError()
+                        (notebook_file.name[:-4] + "_notes")
+                    curr_file_loc.mkdir(exist_ok=True)
+                    curr_file_loc = curr_file_loc / (curr_title + ".md")
 
-                    print("found", curr_file_loc)
                 if curr_file_loc is not None:
                     lines.append(curr_line)
 
-    file = curr_file_loc.open("w", errors="strict", encoding='utf-8')
-    file.writelines(lines)
-    file.close()
-    setctime(curr_file_loc, curr_datetime)
-    utime(curr_file_loc, (curr_datetime, curr_datetime))
-    lines.clear()
+    # Write the last file once all
+    write_file()
 
 
 def process_text_files(in_dir: pathlib.Path) -> None:
-    print(in_dir)
     for notebook_text_file in in_dir.iterdir():
-        notebook_lines = get_notebook_lines(notebook_text_file)
-        print(notebook_lines)
-        produce_markdown_files(notebook_text_file, notebook_lines)
+        try:
+            notebook_lines = get_notebook_lines(notebook_text_file)
+            produce_markdown_files(notebook_text_file, notebook_lines)
+        except (PermissionError, ValueError) as e:
+            print("ERROR creating notebook from text file " +
+                  notebook_text_file.name + ". It will be skipped. error=", e)
 
 
 def main() -> None:
